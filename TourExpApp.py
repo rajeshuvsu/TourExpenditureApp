@@ -5,7 +5,7 @@ from datetime import date
 
 st.set_page_config(page_title="Tour Group Expenditure Split", page_icon="🏝️")
 
-# --- STATE INITIALIZATION ---
+# --- STATE ---
 if "groups" not in st.session_state:
     st.session_state.groups = {
         "Group 1": {
@@ -36,6 +36,7 @@ selected_group = st.sidebar.selectbox(
 )
 if selected_group != st.session_state.active_group:
     st.session_state.active_group = selected_group
+
 g = st.session_state.groups[st.session_state.active_group]
 
 st.sidebar.markdown(f"**Active Group:** {st.session_state.active_group}")
@@ -55,8 +56,10 @@ if g["people"]:
     if st.sidebar.button("Remove Selected Person", key="remove_person_btn"):
         g["people"].remove(remove_person)
         st.success(f"Removed {remove_person}")
+else:
+    st.sidebar.info("Add at least one person to this group.")
 
-# --- MAIN PAGE UI ---
+# --- MAIN UI ---
 st.title("🏝️ Tour Group Expenditure Splitter")
 st.markdown(f"**Managing group:** `{st.session_state.active_group}`")
 
@@ -89,48 +92,39 @@ else:
 def calculate_settlements(df):
     """
     Input: df should have columns 'Person' and 'Net (INR)'
-    Output: A list of {'From', 'To', 'Amount (INR)'} settlements
+    Output: A list of {'From', 'To', 'Amount (INR)'} settlements (with actual names and ₹ symbol)
     """
+    # Round floats to avoid rounding errors
     creditors = []
     debtors = []
-    # Accept both index and "Person" as identifier
-    if 'Person' in df.columns:
-        for _, row in df.iterrows():
-            person = row['Person']
-            amount = round(row['Net (INR)'], 2)
-            if amount > 0:
-                creditors.append([person, amount])
-            elif amount < 0:
-                debtors.append([person, -amount])
-    else:
-        for person, row in df.iterrows():
-            amount = round(row['Net (INR)'], 2)
-            if amount > 0:
-                creditors.append([person, amount])
-            elif amount < 0:
-                debtors.append([person, -amount])
+    for _, row in df.iterrows():
+        person = row['Person']
+        net = round(row['Net (INR)'], 2)
+        if net > 0:
+            creditors.append([person, net])
+        elif net < 0:
+            debtors.append([person, -net])
     settlements = []
     c, d = 0, 0
-    # Main settlement calculation
-    while d < len(debtors) and c < len(creditors):
-        debtor, d_amt = debtors[d]
-        creditor, c_amt = creditors[c]
-        settle_amt = min(d_amt, c_amt)
+    while c < len(creditors) and d < len(debtors):
+        creditor, cred_amt = creditors[c]
+        debtor, debt_amt = debtors[d]
+        settled_amt = min(cred_amt, debt_amt)
         settlements.append({
             "From": debtor,
             "To": creditor,
-            "Amount (INR)": f'₹{settle_amt:,.2f}'
+            "Amount (INR)": f"₹{settled_amt:,.2f}"
         })
-        d_amt -= settle_amt
-        c_amt -= settle_amt
-        if abs(d_amt) < 1e-6:
+        cred_amt -= settled_amt
+        debt_amt -= settled_amt
+        if abs(debt_amt) < 1e-6:
             d += 1
         else:
-            debtors[d][1] = d_amt
-        if abs(c_amt) < 1e-6:
+            debtors[d][1] = debt_amt
+        if abs(cred_amt) < 1e-6:
             c += 1
         else:
-            creditors[c][1] = c_amt
+            creditors[c][1] = cred_amt
     return settlements
 
 # --- MAIN CONTENT ---
@@ -153,25 +147,29 @@ if g["expenses"]:
     share = total / n_people if n_people else 0
     net = paid - share
     settlement_df = pd.DataFrame({
-        "Paid (INR)": paid,
-        "Should Pay Share (INR)": share,
-        "Net (INR)": net
+        "Person": people,
+        "Paid (INR)": paid.tolist(),
+        "Should Pay Share (INR)": [share] * n_people,
+        "Net (INR)": net.tolist()
     })
     settlement_df["Remarks"] = settlement_df["Net (INR)"].apply(
         lambda x: "To Receive" if x > 0 else ("Owes" if x < 0 else "Settled")
     )
-    settlement_df_disp = settlement_df.copy().reset_index().rename(columns={"index": "Person"})
-    st.dataframe(settlement_df_disp.style.format({
+
+    st.dataframe(settlement_df.style.format({
         "Paid (INR)": "₹{:.2f}",
         "Should Pay Share (INR)": "₹{:.2f}",
-        "Net (INR)": "₹{:.2f}"
+        "Net (INR)": "₹{:.2f}",
     }), use_container_width=True)
 
     # --- Who pays whom ---
-    settlements = calculate_settlements(settlement_df_disp)
+    settlements = calculate_settlements(settlement_df)
     if settlements:
         st.subheader("🧾 Who Should Pay Whom")
-        st.table(pd.DataFrame(settlements))
+        settlements_df = pd.DataFrame(settlements)
+        # Format to make ₹ consistent in table visually
+        settlements_df["Amount (INR)"] = settlements_df["Amount (INR)"].apply(lambda x: f"{x}")
+        st.table(settlements_df)
     else:
         st.success("All accounts are settled. No payments needed.")
 
@@ -183,7 +181,8 @@ if g["expenses"]:
             data2.to_excel(writer, index=False, sheet_name='Summary')
             data3.to_excel(writer, index=False, sheet_name='WhoPaysWhom')
         return output.getvalue()
-    excel_data = to_excel(df, settlement_df_disp, pd.DataFrame(settlements))
+    settlements_for_excel = pd.DataFrame(settlements) if settlements else pd.DataFrame(columns=["From", "To", "Amount (INR)"])
+    excel_data = to_excel(df, settlement_df, settlements_for_excel)
 
     st.download_button(
         label=f"Download Excel for {st.session_state.active_group}",
@@ -197,4 +196,3 @@ if g["expenses"]:
         st.warning("All expenses reset.")
 else:
     st.info("No expenses recorded yet. Add your first expense above!")
-
