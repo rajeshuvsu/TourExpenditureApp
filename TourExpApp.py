@@ -5,7 +5,7 @@ from datetime import date
 
 st.set_page_config(page_title="Tour Group Expenditure Split", page_icon="🏝️")
 
-# Initialize all group data in session state
+# --- Streamlit State initialization ---
 if "groups" not in st.session_state:
     st.session_state.groups = {
         "Group 1": {
@@ -60,26 +60,75 @@ st.title("🏝️ Tour Group Expenditure Splitter")
 st.markdown(f"**Managing group:** `{st.session_state.active_group}`")
 
 # --- EXPENSE ENTRY ---
-with st.form("add_expense_form", clear_on_submit=True):
-    spend_date = st.date_input("Date", value=date.today(), key="expense_date")
-    paid_by = st.selectbox("Paid By", g["people"], key="expense_paid_by")
-    category = st.selectbox(
-        "Category",
-        ["Transport", "Accommodation", "Food", "Activities", "Shopping", "Other"],
-        key="expense_cat"
-    )
-    amount = st.number_input("Amount (INR)", min_value=0.0, step=0.01, format="%.2f", key="expense_amount")
-    remarks = st.text_input("Remarks (optional)", key="expense_remarks")
-    submitted = st.form_submit_button("Add Expense")
-    if submitted:
-        g["expenses"].append({
-            "Date": spend_date,
-            "Paid By": paid_by,
-            "Category": category,
-            "Amount (INR)": amount,
-            "Remarks": remarks
+if g["people"]:
+    with st.form("add_expense_form", clear_on_submit=True):
+        spend_date = st.date_input("Date", value=date.today(), key="expense_date")
+        paid_by = st.selectbox("Paid By", g["people"], key="expense_paid_by")
+        category = st.selectbox(
+            "Category",
+            ["Transport", "Accommodation", "Food", "Activities", "Shopping", "Other"],
+            key="expense_cat"
+        )
+        amount = st.number_input("Amount (INR)", min_value=0.0, step=0.01, format="%.2f", key="expense_amount")
+        remarks = st.text_input("Remarks (optional)", key="expense_remarks")
+        submitted = st.form_submit_button("Add Expense")
+        if submitted:
+            g["expenses"].append({
+                "Date": spend_date,
+                "Paid By": paid_by,
+                "Category": category,
+                "Amount (INR)": amount,
+                "Remarks": remarks
+            })
+            st.success("Expense added!")
+else:
+    st.info("Add at least one person to start logging expenses.")
+
+# --- SETTLEMENT ALGORITHM ---
+def calculate_settlements(df):
+    """
+    Input: df should have columns 'Person' and 'Net (INR)'
+    Output: A list of {'From', 'To', 'Amount (INR)'} settlements
+    """
+    creditors = []
+    debtors = []
+    if 'Person' in df.columns:
+        for _, row in df.iterrows():
+            person = row['Person']
+            amount = round(row['Net (INR)'], 2)
+            if amount > 0:
+                creditors.append([person, amount])
+            elif amount < 0:
+                debtors.append([person, -amount])
+    else:
+        for person, row in df.iterrows():
+            amount = round(row['Net (INR)'], 2)
+            if amount > 0:
+                creditors.append([person, amount])
+            elif amount < 0:
+                debtors.append([person, -amount])
+    settlements = []
+    c, d = 0, 0
+    while d < len(debtors) and c < len(creditors):
+        debtor, d_amt = debtors[d]
+        creditor, c_amt = creditors[c]
+        settle_amt = min(d_amt, c_amt)
+        settlements.append({
+            "From": debtor,
+            "To": creditor,
+            "Amount (INR)": round(settle_amt, 2)
         })
-        st.success("Expense added!")
+        d_amt -= settle_amt
+        c_amt -= settle_amt
+        if abs(d_amt) < 1e-6:
+            d += 1
+        else:
+            debtors[d][1] = d_amt
+        if abs(c_amt) < 1e-6:
+            c += 1
+        else:
+            creditors[c][1] = c_amt
+    return settlements
 
 # --- MAIN CONTENT ---
 if g["expenses"]:
@@ -93,8 +142,8 @@ if g["expenses"]:
 
     st.bar_chart(df.groupby("Category")["Amount (INR)"].sum())
 
-    # Settlement Calculation
-    st.subheader("💸 Settlement")
+    # --- Calculation for settlement ---
+    st.subheader("💸 Settlement balances")
     people = g["people"]
     paid = df.groupby("Paid By")["Amount (INR)"].sum().reindex(people, fill_value=0)
     n_people = len(people)
@@ -108,21 +157,30 @@ if g["expenses"]:
     settlement_df["Remarks"] = settlement_df["Net (INR)"].apply(
         lambda x: "To Receive" if x > 0 else ("Owes" if x < 0 else "Settled")
     )
-
-    st.dataframe(settlement_df.style.format({
+    settlement_df_disp = settlement_df.copy().reset_index().rename(columns={"index": "Person"})
+    st.dataframe(settlement_df_disp.style.format({
         "Paid (INR)": "₹{:.2f}",
         "Should Pay Share (INR)": "₹{:.2f}",
         "Net (INR)": "₹{:.2f}"
     }), use_container_width=True)
 
-    # Excel Export
-    def to_excel(data1, data2):
+    # --- Who pays whom ---
+    settlements = calculate_settlements(settlement_df_disp)
+    if settlements:
+        st.subheader("🧾 Who Should Pay Whom")
+        st.table(pd.DataFrame(settlements))
+    else:
+        st.success("All accounts are settled. No payments needed.")
+
+    # --- Excel Export ---
+    def to_excel(data1, data2, data3):
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             data1.to_excel(writer, index=False, sheet_name='Expenses')
-            data2.to_excel(writer, sheet_name='Settlement')
+            data2.to_excel(writer, index=False, sheet_name='Summary')
+            data3.to_excel(writer, index=False, sheet_name='WhoPaysWhom')
         return output.getvalue()
-    excel_data = to_excel(df, settlement_df.reset_index())
+    excel_data = to_excel(df, settlement_df_disp, pd.DataFrame(settlements))
 
     st.download_button(
         label=f"Download Excel for {st.session_state.active_group}",
@@ -136,4 +194,3 @@ if g["expenses"]:
         st.warning("All expenses reset.")
 else:
     st.info("No expenses recorded yet. Add your first expense above!")
-
