@@ -5,32 +5,33 @@ from datetime import date
 
 st.set_page_config(page_title="Tour Expenditure Split", page_icon="🏝️")
 
+# Initialize session state
 if 'expenses' not in st.session_state:
     st.session_state.expenses = []
 if 'people' not in st.session_state:
     st.session_state.people = ["Person 1", "Person 2"]
 
-def clear_new_person():
-    st.session_state["add_person_input"] = ""
+# Callback for clearing the 'Add a person' input
+def clear_add_person_input():
+    st.session_state['add_person_input'] = ""
 
 st.title("🏝️ Tour Expenditure Splitter")
 
 # ---- Sidebar: People management ----
 with st.sidebar:
     st.header("People on Trip")
-    # Add person to trip
     new_person = st.text_input("Add a person", key="add_person_input")
-    if st.button("Add Person", key="add_person_btn"):
+    add_person_clicked = st.button("Add Person", key="add_person_btn", on_click=clear_add_person_input)
+    if add_person_clicked:
         if new_person and new_person not in st.session_state.people:
             st.session_state.people.append(new_person)
             st.success(f"Added {new_person}!")
-        # Clear the text input
-        st.session_state["add_person_input"] = ""
 
     # Remove person
     if st.session_state.people:
         person_to_remove = st.selectbox("Remove person", st.session_state.people, key="remove_person_select")
-        if st.button("Remove Selected Person", key="remove_person_btn"):
+        remove_person_clicked = st.button("Remove Selected Person", key="remove_person_btn")
+        if remove_person_clicked:
             st.session_state.people.remove(person_to_remove)
             st.success(f"Removed {person_to_remove}")
 
@@ -52,6 +53,7 @@ with st.form("add_expense_form", clear_on_submit=True):
         })
         st.success("Expense added!")
 
+# ---- Main page content ----
 if st.session_state.expenses:
     df = pd.DataFrame(st.session_state.expenses)
     st.subheader("All Expenses")
@@ -95,7 +97,7 @@ if st.session_state.expenses:
     excel_data = to_excel(df, settlement_df.reset_index())
 
     st.download_button(
-        label="Download Expenses+Settlement as Excel",
+        label="Download Expenses + Settlement as Excel",
         data=excel_data,
         file_name="tour_expenses.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
