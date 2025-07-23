@@ -5,7 +5,7 @@ from datetime import date
 
 st.set_page_config(page_title="Tour Group Expenditure Split", page_icon="🏝️")
 
-# --- Streamlit State initialization ---
+# --- STATE INITIALIZATION ---
 if "groups" not in st.session_state:
     st.session_state.groups = {
         "Group 1": {
@@ -18,8 +18,6 @@ if "active_group" not in st.session_state:
 
 # --- GROUP MANAGEMENT ---
 st.sidebar.subheader("Travel Groups")
-
-# Create a new group
 new_group = st.sidebar.text_input("Create a new group", key="new_group_name")
 if st.sidebar.button("Add Group"):
     if new_group and new_group not in st.session_state.groups:
@@ -29,13 +27,15 @@ if st.sidebar.button("Add Group"):
     elif new_group in st.session_state.groups:
         st.warning("Group already exists.")
 
-# Select group
 all_groups = list(st.session_state.groups.keys())
-selected_group = st.sidebar.selectbox("Choose active group", all_groups, key="group_select", index=all_groups.index(st.session_state.active_group))
+selected_group = st.sidebar.selectbox(
+    "Choose active group",
+    all_groups,
+    key="group_select",
+    index=all_groups.index(st.session_state.active_group)
+)
 if selected_group != st.session_state.active_group:
     st.session_state.active_group = selected_group
-
-# Access selected group's data
 g = st.session_state.groups[st.session_state.active_group]
 
 st.sidebar.markdown(f"**Active Group:** {st.session_state.active_group}")
@@ -56,6 +56,7 @@ if g["people"]:
         g["people"].remove(remove_person)
         st.success(f"Removed {remove_person}")
 
+# --- MAIN PAGE UI ---
 st.title("🏝️ Tour Group Expenditure Splitter")
 st.markdown(f"**Managing group:** `{st.session_state.active_group}`")
 
@@ -92,6 +93,7 @@ def calculate_settlements(df):
     """
     creditors = []
     debtors = []
+    # Accept both index and "Person" as identifier
     if 'Person' in df.columns:
         for _, row in df.iterrows():
             person = row['Person']
@@ -109,6 +111,7 @@ def calculate_settlements(df):
                 debtors.append([person, -amount])
     settlements = []
     c, d = 0, 0
+    # Main settlement calculation
     while d < len(debtors) and c < len(creditors):
         debtor, d_amt = debtors[d]
         creditor, c_amt = creditors[c]
@@ -116,7 +119,7 @@ def calculate_settlements(df):
         settlements.append({
             "From": debtor,
             "To": creditor,
-            "Amount (INR)": round(settle_amt, 2)
+            "Amount (INR)": f'₹{settle_amt:,.2f}'
         })
         d_amt -= settle_amt
         c_amt -= settle_amt
@@ -142,7 +145,7 @@ if g["expenses"]:
 
     st.bar_chart(df.groupby("Category")["Amount (INR)"].sum())
 
-    # --- Calculation for settlement ---
+    # --- Per person summary ---
     st.subheader("💸 Settlement balances")
     people = g["people"]
     paid = df.groupby("Paid By")["Amount (INR)"].sum().reindex(people, fill_value=0)
@@ -172,7 +175,7 @@ if g["expenses"]:
     else:
         st.success("All accounts are settled. No payments needed.")
 
-    # --- Excel Export ---
+    # --- Excel Export (all tables) ---
     def to_excel(data1, data2, data3):
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -194,3 +197,4 @@ if g["expenses"]:
         st.warning("All expenses reset.")
 else:
     st.info("No expenses recorded yet. Add your first expense above!")
+
