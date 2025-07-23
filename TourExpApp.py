@@ -36,10 +36,11 @@ if st.session_state.expenses:
 
     # Export to Excel
     def to_excel(df):
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+       output = io.BytesIO()
+       with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             df.to_excel(writer, index=False, sheet_name='Expenses')
-        return output.getvalue()
+       # No writer.save()
+       return output.getvalue()
 
     excel_data = to_excel(df)
     st.download_button(
