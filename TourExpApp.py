@@ -16,10 +16,17 @@ if "groups" not in st.session_state:
 if "active_group" not in st.session_state:
     st.session_state.active_group = "Group 1"
 
+# -------- POPUP CLEAR CALLBACKS --------
+def clear_new_group():
+    st.session_state["new_group_name"] = ""
+def clear_person_input():
+    st.session_state["person_input"] = ""
+
 # -------- GROUP MANAGEMENT --------
 st.sidebar.subheader("Travel Groups")
 new_group = st.sidebar.text_input("Create a new group", key="new_group_name")
-if st.sidebar.button("Add Group", key="add_group_btn"):
+add_group_clicked = st.sidebar.button("Add Group", key="add_group_btn", on_click=clear_new_group)
+if add_group_clicked:
     if new_group and new_group not in st.session_state.groups:
         st.session_state.groups[new_group] = {"people": [], "expenses": []}
         st.session_state.active_group = new_group
@@ -27,7 +34,15 @@ if st.sidebar.button("Add Group", key="add_group_btn"):
     elif new_group in st.session_state.groups:
         st.warning("Group already exists.")
 
+# Only show Delete Group button if more than one group exists
 all_groups = list(st.session_state.groups.keys())
+if len(all_groups) > 1:
+    if st.sidebar.button("Delete Current Group", key="delete_group_btn", help="Deletes the currently active group"):
+        del st.session_state.groups[st.session_state.active_group]
+        st.session_state.active_group = list(st.session_state.groups.keys())[0]
+        st.rerun()
+
+# Group selection
 selected_group = st.sidebar.selectbox(
     "Choose active group",
     all_groups,
@@ -39,19 +54,8 @@ if selected_group != st.session_state.active_group:
 g = st.session_state.groups[st.session_state.active_group]
 st.sidebar.markdown(f"**Active Group:** {st.session_state.active_group}")
 
-# --- DELETE GROUP BUTTON (shown only if more than 1 group exists) ---
-if len(all_groups) > 1:
-    if st.sidebar.button("Delete Current Group", key="delete_group_btn", help="Deletes the currently active group"):
-        del st.session_state.groups[st.session_state.active_group]
-        st.session_state.active_group = list(st.session_state.groups.keys())[0]
-        st.rerun()
-
 # -------- PEOPLE MANAGEMENT --------
 st.sidebar.markdown("### People in this group")
-
-def clear_person_input():
-    st.session_state["person_input"] = ""
-
 person_name = st.sidebar.text_input("Add a person (unique)", key="person_input")
 add_person_clicked = st.sidebar.button("Add Person", key="add_person_btn", on_click=clear_person_input)
 if add_person_clicked:
