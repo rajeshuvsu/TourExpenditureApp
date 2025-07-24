@@ -83,7 +83,7 @@ if g["people"]:
             })
             st.success("Expense added!")
 
-# --- INLINE DATA EDITING TABLE ---
+# --- SETTLEMENT ALGORITHM ---
 def calculate_settlements(df):
     creditors = []
     debtors = []
@@ -117,11 +117,12 @@ def calculate_settlements(df):
             creditors[c][1] = cred_amt
     return settlements
 
+# --- MAIN CONTENT ---
 if g["expenses"]:
-    # This is your main table for tabular editing:
     df = pd.DataFrame(g["expenses"])
-    st.subheader("All Expenses (double-click in table to edit and save)")
 
+    # Inline editable table using st.data_editor
+    st.subheader("All Expenses (double-click to edit in table and save)")
     edited_df = st.data_editor(
         df,
         num_rows="dynamic",
@@ -139,9 +140,10 @@ if g["expenses"]:
     total = edited_df['Amount (INR)'].sum()
     st.metric("Total Spent", f"₹{total:,.2f}")
 
+    # Chart
     st.bar_chart(edited_df.groupby("Category")["Amount (INR)"].sum())
 
-    # --- Per person summary ---
+    # --- Per person summary (Settlement balances) ---
     st.subheader("💸 Settlement balances")
     people = g["people"]
     paid = edited_df.groupby("Paid By")["Amount (INR)"].sum().reindex(people, fill_value=0)
@@ -166,33 +168,35 @@ if g["expenses"]:
 
     # --- Who pays whom ---
     settlements = calculate_settlements(settlement_df)
+    settlements_for_excel = pd.DataFrame(settlements) if settlements else pd.DataFrame(columns=["From", "To", "Amount (INR)"])
+
     if settlements:
         st.subheader("🧾 Who Should Pay Whom")
-        settlements_df = pd.DataFrame(settlements)
-        st.table(settlements_df)
+        st.table(settlements_for_excel)
     else:
         st.success("All accounts are settled. No payments needed.")
 
-    # Excel Export
-    def to_excel(data1, data2, data3):
+    # --- Export Excel: both settlements are exported! ---
+    def to_excel(balances, whopaywhom):
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            data1.to_excel(writer, index=False, sheet_name='Expenses')
-            data2.to_excel(writer, index=False, sheet_name='Summary')
-            data3.to_excel(writer, index=False, sheet_name='WhoPaysWhom')
+            balances.to_excel(writer, index=False, sheet_name='SettlementBalances')
+            whopaywhom.to_excel(writer, index=False, sheet_name='WhoShouldPayWhom')
         return output.getvalue()
-    settlements_for_excel = pd.DataFrame(settlements) if settlements else pd.DataFrame(columns=["From", "To", "Amount (INR)"])
-    excel_data = to_excel(edited_df, settlement_df, settlements_for_excel)
+
+    excel_data = to_excel(settlement_df, settlements_for_excel)
 
     st.download_button(
-        label=f"Download Excel for {st.session_state.active_group}",
+        label="Download Settlement Balances & Who-Pays-Whom (Excel)",
         data=excel_data,
-        file_name=f"{st.session_state.active_group}_expenses.xlsx",
+        file_name=f"{st.session_state.active_group}_settlements.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
     if st.button("Reset All Expenses", key="reset_exp_btn"):
         g["expenses"].clear()
         st.warning("All expenses reset.")
+
 else:
     st.info("No expenses recorded yet. Add your first expense above!")
+
