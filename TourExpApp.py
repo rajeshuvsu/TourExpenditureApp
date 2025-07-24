@@ -15,8 +15,6 @@ if "groups" not in st.session_state:
     }
 if "active_group" not in st.session_state:
     st.session_state.active_group = "Group 1"
-if "edit_row" not in st.session_state:
-    st.session_state.edit_row = None  # (row index) if editing
 
 # --- GROUP MANAGEMENT ---
 st.sidebar.subheader("Travel Groups")
@@ -66,17 +64,14 @@ st.title("🏝️ Tour Group Expenditure Splitter")
 st.markdown(f"**Managing group:** `{st.session_state.active_group}`")
 
 # --- EXPENSE ENTRY ---
-if g["people"] and st.session_state.edit_row is None:
+if g["people"]:
     with st.form("add_expense_form", clear_on_submit=True):
-        spend_date = st.date_input("Date", value=date.today(), key="expense_date")
-        paid_by = st.selectbox("Paid By", g["people"], key="expense_paid_by")
-        category = st.selectbox(
-            "Category",
-            ["Transport", "Accommodation", "Food", "Activities", "Shopping", "Other"],
-            key="expense_cat"
-        )
-        amount = st.number_input("Amount (INR)", min_value=0.0, step=0.01, format="%.2f", key="expense_amount")
-        remarks = st.text_input("Remarks (optional)", key="expense_remarks")
+        spend_date = st.date_input("Date", value=date.today())
+        paid_by = st.selectbox("Paid By", g["people"])
+        category = st.selectbox("Category",
+            ["Transport", "Accommodation", "Food", "Activities", "Shopping", "Other"])
+        amount = st.number_input("Amount (INR)", min_value=0.0, step=0.01, format="%.2f")
+        remarks = st.text_input("Remarks (optional)")
         submitted = st.form_submit_button("Add Expense")
         if submitted:
             g["expenses"].append({
@@ -87,37 +82,8 @@ if g["people"] and st.session_state.edit_row is None:
                 "Remarks": remarks
             })
             st.success("Expense added!")
-elif st.session_state.edit_row is not None:
-    # --- Edit Mode ---
-    idx = st.session_state.edit_row
-    expense = g["expenses"][idx]
-    st.info(f"Editing Expense #{idx+1}")
 
-    with st.form(f"edit_expense_form_{idx}"):
-        spend_date = st.date_input("Date", value=expense["Date"], key=f"edit_date_{idx}")
-        paid_by = st.selectbox("Paid By", g["people"], index=g["people"].index(expense["Paid By"]), key=f"edit_paidby_{idx}")
-        category = st.selectbox("Category",
-            ["Transport", "Accommodation", "Food", "Activities", "Shopping", "Other"],
-            index=["Transport", "Accommodation", "Food", "Activities", "Shopping", "Other"].index(expense["Category"]),
-            key=f"edit_cat_{idx}")
-        amount = st.number_input("Amount (INR)", min_value=0.0, value=expense["Amount (INR)"], step=0.01, format="%.2f", key=f"edit_amount_{idx}")
-        remarks = st.text_input("Remarks (optional)", value=expense["Remarks"], key=f"edit_remarks_{idx}")
-        edit_submit = st.form_submit_button("Update Expense")
-        if edit_submit:
-            g["expenses"][idx] = {
-                "Date": spend_date,
-                "Paid By": paid_by,
-                "Category": category,
-                "Amount (INR)": amount,
-                "Remarks": remarks
-            }
-            st.success(f"Expense #{idx+1} updated.")
-            st.session_state.edit_row = None
-
-    if st.button("Cancel Edit", key="cancel_edit"):
-        st.session_state.edit_row = None
-
-# --- SETTLEMENT ALGORITHM ---
+# --- INLINE DATA EDITING TABLE ---
 def calculate_settlements(df):
     creditors = []
     debtors = []
@@ -151,36 +117,34 @@ def calculate_settlements(df):
             creditors[c][1] = cred_amt
     return settlements
 
-# --- MAIN CONTENT ---
 if g["expenses"]:
+    # This is your main table for tabular editing:
     df = pd.DataFrame(g["expenses"])
+    st.subheader("All Expenses (double-click in table to edit and save)")
 
-    # Inline actions
-    st.subheader("All Expenses")
-    edit_col, delete_col = st.columns([1, 1])
-    for i, row in df.iterrows():
-        c1, c2 = st.columns([12, 1])
-        c1.write(
-            f"**{row['Date']}**, {row['Category']} - ₹{row['Amount (INR)']:,.2f} paid by **{row['Paid By']}**{' | '+row['Remarks'] if row['Remarks'] else ''}"
-        )
-        if c2.button("✏️ Edit", key=f"edit_btn_{i}"):
-            st.session_state.edit_row = i
-            st.experimental_rerun()
-        if c2.button("❌ Delete", key=f"del_btn_{i}"):
-            g["expenses"].pop(i)
-            st.success(f"Expense #{i+1} deleted.")
-            st.experimental_rerun()
+    edited_df = st.data_editor(
+        df,
+        num_rows="dynamic",
+        key="data_editor",
+        use_container_width=True,
+        hide_index=True
+    )
 
-    st.divider()
+    # If user edited, save back to original session state
+    if not edited_df.equals(df):
+        g["expenses"] = edited_df.astype(df.dtypes).to_dict("records")
+        st.success("Expenses updated.")
+
     st.subheader("Summary")
-    total = df['Amount (INR)'].sum()
+    total = edited_df['Amount (INR)'].sum()
     st.metric("Total Spent", f"₹{total:,.2f}")
 
-    st.bar_chart(df.groupby("Category")["Amount (INR)"].sum())
+    st.bar_chart(edited_df.groupby("Category")["Amount (INR)"].sum())
 
+    # --- Per person summary ---
     st.subheader("💸 Settlement balances")
     people = g["people"]
-    paid = df.groupby("Paid By")["Amount (INR)"].sum().reindex(people, fill_value=0)
+    paid = edited_df.groupby("Paid By")["Amount (INR)"].sum().reindex(people, fill_value=0)
     n_people = len(people)
     share = total / n_people if n_people else 0
     net = paid - share
@@ -205,7 +169,6 @@ if g["expenses"]:
     if settlements:
         st.subheader("🧾 Who Should Pay Whom")
         settlements_df = pd.DataFrame(settlements)
-        settlements_df["Amount (INR)"] = settlements_df["Amount (INR)"].apply(lambda x: f"{x}")
         st.table(settlements_df)
     else:
         st.success("All accounts are settled. No payments needed.")
@@ -219,7 +182,7 @@ if g["expenses"]:
             data3.to_excel(writer, index=False, sheet_name='WhoPaysWhom')
         return output.getvalue()
     settlements_for_excel = pd.DataFrame(settlements) if settlements else pd.DataFrame(columns=["From", "To", "Amount (INR)"])
-    excel_data = to_excel(df, settlement_df, settlements_for_excel)
+    excel_data = to_excel(edited_df, settlement_df, settlements_for_excel)
 
     st.download_button(
         label=f"Download Excel for {st.session_state.active_group}",
