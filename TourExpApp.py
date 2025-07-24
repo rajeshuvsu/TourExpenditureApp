@@ -18,7 +18,6 @@ if "active_group" not in st.session_state:
 
 # --- GROUP MANAGEMENT ---
 st.sidebar.subheader("Travel Groups")
-# Add group
 new_group = st.sidebar.text_input("Create a new group", key="new_group_name")
 if st.sidebar.button("Add Group", key="add_group_btn"):
     if new_group and new_group not in st.session_state.groups:
@@ -28,7 +27,6 @@ if st.sidebar.button("Add Group", key="add_group_btn"):
     elif new_group in st.session_state.groups:
         st.warning("Group already exists.")
 
-# Select group
 all_groups = list(st.session_state.groups.keys())
 selected_group = st.sidebar.selectbox(
     "Choose active group",
@@ -45,7 +43,6 @@ st.sidebar.markdown(f"**Active Group:** {st.session_state.active_group}")
 if len(all_groups) > 1:
     if st.sidebar.button("Delete Current Group", key="delete_group_btn", help="Deletes the currently active group"):
         del st.session_state.groups[st.session_state.active_group]
-        # Set active group to the first available
         st.session_state.active_group = list(st.session_state.groups.keys())[0]
         st.rerun()
 else:
@@ -53,15 +50,20 @@ else:
 
 # --- PEOPLE MANAGEMENT ---
 st.sidebar.markdown("### People in this group")
-def clear_person_name():
+
+def clear_person_input():
     st.session_state["person_input"] = ""
 
 person_name = st.sidebar.text_input("Add a person (unique)", key="person_input")
-if st.sidebar.button("Add Person", key="add_person_btn"):
+add_person_clicked = st.sidebar.button(
+    "Add Person",
+    key="add_person_btn",
+    on_click=clear_person_input
+)
+if add_person_clicked:
     if person_name and person_name not in g["people"]:
         g["people"].append(person_name)
         st.success(f"Added {person_name} to {st.session_state.active_group}!")
-        st.session_state["person_input"] = ""  # Clear input!
     elif person_name in g["people"]:
         st.warning("That person already exists for this group.")
 
@@ -213,4 +215,3 @@ if g["expenses"]:
 
 else:
     st.info("No expenses recorded yet. Add your first expense above!")
-
