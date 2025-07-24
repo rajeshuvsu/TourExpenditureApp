@@ -3,7 +3,7 @@ import pandas as pd
 import io
 from datetime import date
 
-st.set_page_config(page_title="Tour Group Expenditure Split", page_icon="🏝️")
+st.set_page_config(page_title="Tour Group Expenditure Splitter", page_icon="🏝️")
 
 # --- STATE ---
 if "groups" not in st.session_state:
@@ -68,8 +68,7 @@ if g["people"]:
     with st.form("add_expense_form", clear_on_submit=True):
         spend_date = st.date_input("Date", value=date.today())
         paid_by = st.selectbox("Paid By", g["people"])
-        category = st.selectbox("Category",
-            ["Transport", "Accommodation", "Food", "Activities", "Shopping", "Other"])
+        category = st.selectbox("Category", ["Transport", "Accommodation", "Food", "Activities", "Shopping", "Other"])
         amount = st.number_input("Amount (INR)", min_value=0.0, step=0.01, format="%.2f")
         remarks = st.text_input("Remarks (optional)")
         submitted = st.form_submit_button("Add Expense")
@@ -119,34 +118,34 @@ def calculate_settlements(df):
 
 # --- MAIN CONTENT ---
 if g["expenses"]:
-    df = pd.DataFrame(g["expenses"])
+    expenses_df = pd.DataFrame(g["expenses"])
 
-    # Inline editable table using st.data_editor
+    # Editable table (double-click to edit)
     st.subheader("All Expenses (double-click to edit in table and save)")
     edited_df = st.data_editor(
-        df,
+        expenses_df, 
         num_rows="dynamic",
         key="data_editor",
         use_container_width=True,
         hide_index=True
     )
 
-    # If user edited, save back to original session state
-    if not edited_df.equals(df):
-        g["expenses"] = edited_df.astype(df.dtypes).to_dict("records")
-        st.success("Expenses updated.")
+    # Persist edits for future runs (optional but nice for state)
+    if not edited_df.equals(expenses_df):
+        g["expenses"] = edited_df.astype(expenses_df.dtypes).to_dict("records")
+
+    expenses_to_use = edited_df.copy()
 
     st.subheader("Summary")
-    total = edited_df['Amount (INR)'].sum()
+    total = expenses_to_use["Amount (INR)"].sum()
     st.metric("Total Spent", f"₹{total:,.2f}")
 
-    # Chart
-    st.bar_chart(edited_df.groupby("Category")["Amount (INR)"].sum())
+    st.bar_chart(expenses_to_use.groupby("Category")["Amount (INR)"].sum())
 
-    # --- Per person summary (Settlement balances) ---
+    # --- Settlement balances ---
     st.subheader("💸 Settlement balances")
     people = g["people"]
-    paid = edited_df.groupby("Paid By")["Amount (INR)"].sum().reindex(people, fill_value=0)
+    paid = expenses_to_use.groupby("Paid By")["Amount (INR)"].sum().reindex(people, fill_value=0)
     n_people = len(people)
     share = total / n_people if n_people else 0
     net = paid - share
@@ -160,11 +159,14 @@ if g["expenses"]:
         lambda x: "To Receive" if x > 0 else ("Owes" if x < 0 else "Settled")
     )
 
-    st.dataframe(settlement_df.style.format({
-        "Paid (INR)": "₹{:.2f}",
-        "Should Pay Share (INR)": "₹{:.2f}",
-        "Net (INR)": "₹{:.2f}",
-    }), use_container_width=True)
+    st.dataframe(
+        settlement_df.style.format({
+            "Paid (INR)": "₹{:.2f}",
+            "Should Pay Share (INR)": "₹{:.2f}",
+            "Net (INR)": "₹{:.2f}"
+        }), 
+        use_container_width=True
+    )
 
     # --- Who pays whom ---
     settlements = calculate_settlements(settlement_df)
@@ -176,7 +178,7 @@ if g["expenses"]:
     else:
         st.success("All accounts are settled. No payments needed.")
 
-    # --- Export Excel: both settlements are exported! ---
+    # --- Export to Excel: both settlement balances and Who-Pays-Whom tables ---
     def to_excel(balances, whopaywhom):
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
