@@ -18,8 +18,9 @@ if "active_group" not in st.session_state:
 
 # --- GROUP MANAGEMENT ---
 st.sidebar.subheader("Travel Groups")
+# Add group
 new_group = st.sidebar.text_input("Create a new group", key="new_group_name")
-if st.sidebar.button("Add Group"):
+if st.sidebar.button("Add Group", key="add_group_btn"):
     if new_group and new_group not in st.session_state.groups:
         st.session_state.groups[new_group] = {"people": [], "expenses": []}
         st.session_state.active_group = new_group
@@ -27,6 +28,7 @@ if st.sidebar.button("Add Group"):
     elif new_group in st.session_state.groups:
         st.warning("Group already exists.")
 
+# Select group
 all_groups = list(st.session_state.groups.keys())
 selected_group = st.sidebar.selectbox(
     "Choose active group",
@@ -36,18 +38,30 @@ selected_group = st.sidebar.selectbox(
 )
 if selected_group != st.session_state.active_group:
     st.session_state.active_group = selected_group
-
 g = st.session_state.groups[st.session_state.active_group]
-
 st.sidebar.markdown(f"**Active Group:** {st.session_state.active_group}")
+
+# --- DELETE GROUP (disable if only 1 group left) ---
+if len(all_groups) > 1:
+    if st.sidebar.button("Delete Current Group", key="delete_group_btn", help="Deletes the currently active group"):
+        del st.session_state.groups[st.session_state.active_group]
+        # Set active group to the first available
+        st.session_state.active_group = list(st.session_state.groups.keys())[0]
+        st.rerun()
+else:
+    st.sidebar.button("Delete Current Group", disabled=True, key="delete_group_btn_disabled")
 
 # --- PEOPLE MANAGEMENT ---
 st.sidebar.markdown("### People in this group")
+def clear_person_name():
+    st.session_state["person_input"] = ""
+
 person_name = st.sidebar.text_input("Add a person (unique)", key="person_input")
 if st.sidebar.button("Add Person", key="add_person_btn"):
     if person_name and person_name not in g["people"]:
         g["people"].append(person_name)
         st.success(f"Added {person_name} to {st.session_state.active_group}!")
+        st.session_state["person_input"] = ""  # Clear input!
     elif person_name in g["people"]:
         st.warning("That person already exists for this group.")
 
@@ -64,23 +78,22 @@ st.title("🏝️ Tour Group Expenditure Splitter")
 st.markdown(f"**Managing group:** `{st.session_state.active_group}`")
 
 # --- EXPENSE ENTRY ---
-if g["people"]:
-    with st.form("add_expense_form", clear_on_submit=True):
-        spend_date = st.date_input("Date", value=date.today())
-        paid_by = st.selectbox("Paid By", g["people"])
-        category = st.selectbox("Category", ["Transport", "Accommodation", "Food", "Activities", "Shopping", "Other"])
-        amount = st.number_input("Amount (INR)", min_value=0.0, step=0.01, format="%.2f")
-        remarks = st.text_input("Remarks (optional)")
-        submitted = st.form_submit_button("Add Expense")
-        if submitted:
-            g["expenses"].append({
-                "Date": spend_date,
-                "Paid By": paid_by,
-                "Category": category,
-                "Amount (INR)": amount,
-                "Remarks": remarks
-            })
-            st.success("Expense added!")
+with st.form("add_expense_form", clear_on_submit=True):
+    spend_date = st.date_input("Date", value=date.today())
+    paid_by = st.selectbox("Paid By", g["people"] if g["people"] else [""], disabled=not bool(g["people"]))
+    category = st.selectbox("Category", ["Transport", "Accommodation", "Food", "Activities", "Shopping", "Other"])
+    amount = st.number_input("Amount (INR)", min_value=0.0, step=0.01, format="%.2f")
+    remarks = st.text_input("Remarks (optional)")
+    submitted = st.form_submit_button("Add Expense")
+    if submitted and paid_by:
+        g["expenses"].append({
+            "Date": spend_date,
+            "Paid By": paid_by,
+            "Category": category,
+            "Amount (INR)": amount,
+            "Remarks": remarks
+        })
+        st.success("Expense added!")
 
 # --- SETTLEMENT ALGORITHM ---
 def calculate_settlements(df):
@@ -120,12 +133,11 @@ def calculate_settlements(df):
 if g["expenses"]:
     expenses_df = pd.DataFrame(g["expenses"])
 
-    # Editable table (double-click to edit)
     st.subheader("All Expenses (double-click to edit in table and save)")
     edited_df = st.data_editor(
-        expenses_df, 
+        expenses_df,
         num_rows="dynamic",
-        key="data_editor",
+        key=f"data_editor_{st.session_state.active_group}",
         use_container_width=True,
         hide_index=True
     )
@@ -142,7 +154,7 @@ if g["expenses"]:
 
     st.bar_chart(expenses_to_use.groupby("Category")["Amount (INR)"].sum())
 
-    # --- Settlement balances ---
+    # --- Settlement balances
     st.subheader("💸 Settlement balances")
     people = g["people"]
     paid = expenses_to_use.groupby("Paid By")["Amount (INR)"].sum().reindex(people, fill_value=0)
@@ -164,7 +176,7 @@ if g["expenses"]:
             "Paid (INR)": "₹{:.2f}",
             "Should Pay Share (INR)": "₹{:.2f}",
             "Net (INR)": "₹{:.2f}"
-        }), 
+        }),
         use_container_width=True
     )
 
@@ -178,7 +190,7 @@ if g["expenses"]:
     else:
         st.success("All accounts are settled. No payments needed.")
 
-    # --- Export to Excel: both settlement balances and Who-Pays-Whom tables ---
+    # --- Export to Excel with both settlement tables ---
     def to_excel(balances, whopaywhom):
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
