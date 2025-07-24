@@ -15,6 +15,8 @@ if "groups" not in st.session_state:
     }
 if "active_group" not in st.session_state:
     st.session_state.active_group = "Group 1"
+if "edit_row" not in st.session_state:
+    st.session_state.edit_row = None  # (row index) if editing
 
 # --- GROUP MANAGEMENT ---
 st.sidebar.subheader("Travel Groups")
@@ -64,7 +66,7 @@ st.title("🏝️ Tour Group Expenditure Splitter")
 st.markdown(f"**Managing group:** `{st.session_state.active_group}`")
 
 # --- EXPENSE ENTRY ---
-if g["people"]:
+if g["people"] and st.session_state.edit_row is None:
     with st.form("add_expense_form", clear_on_submit=True):
         spend_date = st.date_input("Date", value=date.today(), key="expense_date")
         paid_by = st.selectbox("Paid By", g["people"], key="expense_paid_by")
@@ -85,16 +87,38 @@ if g["people"]:
                 "Remarks": remarks
             })
             st.success("Expense added!")
-else:
-    st.info("Add at least one person to start logging expenses.")
+elif st.session_state.edit_row is not None:
+    # --- Edit Mode ---
+    idx = st.session_state.edit_row
+    expense = g["expenses"][idx]
+    st.info(f"Editing Expense #{idx+1}")
+
+    with st.form(f"edit_expense_form_{idx}"):
+        spend_date = st.date_input("Date", value=expense["Date"], key=f"edit_date_{idx}")
+        paid_by = st.selectbox("Paid By", g["people"], index=g["people"].index(expense["Paid By"]), key=f"edit_paidby_{idx}")
+        category = st.selectbox("Category",
+            ["Transport", "Accommodation", "Food", "Activities", "Shopping", "Other"],
+            index=["Transport", "Accommodation", "Food", "Activities", "Shopping", "Other"].index(expense["Category"]),
+            key=f"edit_cat_{idx}")
+        amount = st.number_input("Amount (INR)", min_value=0.0, value=expense["Amount (INR)"], step=0.01, format="%.2f", key=f"edit_amount_{idx}")
+        remarks = st.text_input("Remarks (optional)", value=expense["Remarks"], key=f"edit_remarks_{idx}")
+        edit_submit = st.form_submit_button("Update Expense")
+        if edit_submit:
+            g["expenses"][idx] = {
+                "Date": spend_date,
+                "Paid By": paid_by,
+                "Category": category,
+                "Amount (INR)": amount,
+                "Remarks": remarks
+            }
+            st.success(f"Expense #{idx+1} updated.")
+            st.session_state.edit_row = None
+
+    if st.button("Cancel Edit", key="cancel_edit"):
+        st.session_state.edit_row = None
 
 # --- SETTLEMENT ALGORITHM ---
 def calculate_settlements(df):
-    """
-    Input: df should have columns 'Person' and 'Net (INR)'
-    Output: A list of {'From', 'To', 'Amount (INR)'} settlements (with actual names and ₹ symbol)
-    """
-    # Round floats to avoid rounding errors
     creditors = []
     debtors = []
     for _, row in df.iterrows():
@@ -130,16 +154,30 @@ def calculate_settlements(df):
 # --- MAIN CONTENT ---
 if g["expenses"]:
     df = pd.DataFrame(g["expenses"])
-    st.subheader("All Expenses")
-    st.dataframe(df, use_container_width=True)
 
+    # Inline actions
+    st.subheader("All Expenses")
+    edit_col, delete_col = st.columns([1, 1])
+    for i, row in df.iterrows():
+        c1, c2 = st.columns([12, 1])
+        c1.write(
+            f"**{row['Date']}**, {row['Category']} - ₹{row['Amount (INR)']:,.2f} paid by **{row['Paid By']}**{' | '+row['Remarks'] if row['Remarks'] else ''}"
+        )
+        if c2.button("✏️ Edit", key=f"edit_btn_{i}"):
+            st.session_state.edit_row = i
+            st.experimental_rerun()
+        if c2.button("❌ Delete", key=f"del_btn_{i}"):
+            g["expenses"].pop(i)
+            st.success(f"Expense #{i+1} deleted.")
+            st.experimental_rerun()
+
+    st.divider()
     st.subheader("Summary")
     total = df['Amount (INR)'].sum()
     st.metric("Total Spent", f"₹{total:,.2f}")
 
     st.bar_chart(df.groupby("Category")["Amount (INR)"].sum())
 
-    # --- Per person summary ---
     st.subheader("💸 Settlement balances")
     people = g["people"]
     paid = df.groupby("Paid By")["Amount (INR)"].sum().reindex(people, fill_value=0)
@@ -167,13 +205,12 @@ if g["expenses"]:
     if settlements:
         st.subheader("🧾 Who Should Pay Whom")
         settlements_df = pd.DataFrame(settlements)
-        # Format to make ₹ consistent in table visually
         settlements_df["Amount (INR)"] = settlements_df["Amount (INR)"].apply(lambda x: f"{x}")
         st.table(settlements_df)
     else:
         st.success("All accounts are settled. No payments needed.")
 
-    # --- Excel Export (all tables) ---
+    # Excel Export
     def to_excel(data1, data2, data3):
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
