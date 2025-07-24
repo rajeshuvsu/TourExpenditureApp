@@ -5,7 +5,7 @@ from datetime import date
 
 st.set_page_config(page_title="Tour Group Expenditure Splitter", page_icon="🏝️")
 
-# --- STATE ---
+# -------- STATE --------
 if "groups" not in st.session_state:
     st.session_state.groups = {
         "Group 1": {
@@ -16,7 +16,7 @@ if "groups" not in st.session_state:
 if "active_group" not in st.session_state:
     st.session_state.active_group = "Group 1"
 
-# --- GROUP MANAGEMENT ---
+# -------- GROUP MANAGEMENT --------
 st.sidebar.subheader("Travel Groups")
 new_group = st.sidebar.text_input("Create a new group", key="new_group_name")
 if st.sidebar.button("Add Group", key="add_group_btn"):
@@ -32,34 +32,28 @@ selected_group = st.sidebar.selectbox(
     "Choose active group",
     all_groups,
     key="group_select",
-    index=all_groups.index(st.session_state.active_group)
+    index=all_groups.index(st.session_state.active_group) if st.session_state.active_group in all_groups else 0
 )
 if selected_group != st.session_state.active_group:
     st.session_state.active_group = selected_group
 g = st.session_state.groups[st.session_state.active_group]
 st.sidebar.markdown(f"**Active Group:** {st.session_state.active_group}")
 
-# --- DELETE GROUP (disable if only 1 group left) ---
+# --- DELETE GROUP BUTTON (shown only if more than 1 group exists) ---
 if len(all_groups) > 1:
     if st.sidebar.button("Delete Current Group", key="delete_group_btn", help="Deletes the currently active group"):
         del st.session_state.groups[st.session_state.active_group]
         st.session_state.active_group = list(st.session_state.groups.keys())[0]
         st.rerun()
-else:
-    st.sidebar.button("Delete Current Group", disabled=True, key="delete_group_btn_disabled")
 
-# --- PEOPLE MANAGEMENT ---
+# -------- PEOPLE MANAGEMENT --------
 st.sidebar.markdown("### People in this group")
 
 def clear_person_input():
     st.session_state["person_input"] = ""
 
 person_name = st.sidebar.text_input("Add a person (unique)", key="person_input")
-add_person_clicked = st.sidebar.button(
-    "Add Person",
-    key="add_person_btn",
-    on_click=clear_person_input
-)
+add_person_clicked = st.sidebar.button("Add Person", key="add_person_btn", on_click=clear_person_input)
 if add_person_clicked:
     if person_name and person_name not in g["people"]:
         g["people"].append(person_name)
@@ -75,11 +69,11 @@ if g["people"]:
 else:
     st.sidebar.info("Add at least one person to this group.")
 
-# --- MAIN UI ---
+# -------- MAIN UI --------
 st.title("🏝️ Tour Group Expenditure Splitter")
 st.markdown(f"**Managing group:** `{st.session_state.active_group}`")
 
-# --- EXPENSE ENTRY ---
+# -------- EXPENSE ENTRY --------
 with st.form("add_expense_form", clear_on_submit=True):
     spend_date = st.date_input("Date", value=date.today())
     paid_by = st.selectbox("Paid By", g["people"] if g["people"] else [""], disabled=not bool(g["people"]))
@@ -97,7 +91,7 @@ with st.form("add_expense_form", clear_on_submit=True):
         })
         st.success("Expense added!")
 
-# --- SETTLEMENT ALGORITHM ---
+# -------- SETTLEMENT ALGORITHM --------
 def calculate_settlements(df):
     creditors = []
     debtors = []
@@ -131,7 +125,7 @@ def calculate_settlements(df):
             creditors[c][1] = cred_amt
     return settlements
 
-# --- MAIN CONTENT ---
+# -------- MAIN CONTENT --------
 if g["expenses"]:
     expenses_df = pd.DataFrame(g["expenses"])
 
@@ -144,19 +138,26 @@ if g["expenses"]:
         hide_index=True
     )
 
-    # Persist edits for future runs (optional but nice for state)
+    # Always use the latest edited data for all calculations!
     if not edited_df.equals(expenses_df):
         g["expenses"] = edited_df.astype(expenses_df.dtypes).to_dict("records")
-
     expenses_to_use = edited_df.copy()
+
+    # --- Amount Validation for Each Row ---
+    invalid_rows = expenses_to_use[expenses_to_use["Amount (INR)"] <= 0]
+    if not invalid_rows.empty:
+        for idx, row in invalid_rows.iterrows():
+            st.error(f"Enter valid amount for {row['Paid By']} (Row {idx+1}). Amount must be positive.")
+        valid_data_for_export = False
+    else:
+        valid_data_for_export = True
 
     st.subheader("Summary")
     total = expenses_to_use["Amount (INR)"].sum()
     st.metric("Total Spent", f"₹{total:,.2f}")
-
     st.bar_chart(expenses_to_use.groupby("Category")["Amount (INR)"].sum())
 
-    # --- Settlement balances
+    # ---- Settlement balances
     st.subheader("💸 Settlement balances")
     people = g["people"]
     paid = expenses_to_use.groupby("Paid By")["Amount (INR)"].sum().reindex(people, fill_value=0)
@@ -172,7 +173,6 @@ if g["expenses"]:
     settlement_df["Remarks"] = settlement_df["Net (INR)"].apply(
         lambda x: "To Receive" if x > 0 else ("Owes" if x < 0 else "Settled")
     )
-
     st.dataframe(
         settlement_df.style.format({
             "Paid (INR)": "₹{:.2f}",
@@ -182,7 +182,7 @@ if g["expenses"]:
         use_container_width=True
     )
 
-    # --- Who pays whom ---
+    # ---- Who pays whom
     settlements = calculate_settlements(settlement_df)
     settlements_for_excel = pd.DataFrame(settlements) if settlements else pd.DataFrame(columns=["From", "To", "Amount (INR)"])
 
@@ -192,7 +192,7 @@ if g["expenses"]:
     else:
         st.success("All accounts are settled. No payments needed.")
 
-    # --- Export to Excel with both settlement tables ---
+    # ---- Export to Excel with both settlement tables
     def to_excel(balances, whopaywhom):
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -202,12 +202,18 @@ if g["expenses"]:
 
     excel_data = to_excel(settlement_df, settlements_for_excel)
 
-    st.download_button(
-        label="Download Settlement Balances & Who-Pays-Whom (Excel)",
-        data=excel_data,
-        file_name=f"{st.session_state.active_group}_settlements.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    if valid_data_for_export:
+        st.download_button(
+            label="Download Settlement Balances & Who-Pays-Whom (Excel)",
+            data=excel_data,
+            file_name=f"{st.session_state.active_group}_settlements.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    else:
+        st.button(
+            "Download Settlement Balances & Who-Pays-Whom (Excel) [Fix Invalid Amounts]",
+            disabled=True
+        )
 
     if st.button("Reset All Expenses", key="reset_exp_btn"):
         g["expenses"].clear()
